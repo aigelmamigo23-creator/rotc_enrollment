@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ROTC Enrollment</title>
+<style>
+:root{--navy:#0b2a4a;--sky:#e8f1f8;--gold:#e0a526;--ink:#13202e;--line:#c5d3e0;--red:#b3261e}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",system-ui,sans-serif;background:var(--sky);color:var(--ink);line-height:1.5}
+header{background:var(--navy);color:#fff;padding:22px 20px;border-bottom:5px solid var(--gold)}
+header h1{margin:0;font-size:1.35rem}
+header p{margin:4px 0 0;opacity:.8;font-size:.95rem}
+main{max-width:520px;margin:0 auto;padding:24px 20px 60px}
+label{display:block;font-weight:600;margin:18px 0 6px}
+input{width:100%;padding:13px 14px;font-size:1rem;border:1.5px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+input:focus,button:focus-visible{outline:3px solid var(--gold);outline-offset:1px}
+button{width:100%;margin-top:24px;background:var(--navy);color:#fff;border:0;border-radius:6px;padding:14px 20px;font-size:1rem;font-weight:600;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+.error{background:#fdeceb;border-left:4px solid var(--red);padding:10px 14px;margin-top:16px;border-radius:4px}
+.notice{background:#fff7e0;border-left:4px solid var(--gold);padding:10px 14px;margin-bottom:16px;border-radius:4px;font-size:.9rem}
+.ok{background:#fff;border:1.5px solid var(--line);border-left:6px solid var(--gold);padding:20px;border-radius:6px}
+.ok h2{margin-top:0}
+.hidden{display:none}
+#qrbox{background:#fff;display:inline-block;padding:16px;border:1.5px solid var(--line);border-radius:6px}
+.muted{color:#51657a;font-size:.9rem;word-break:break-all}
+.link{background:none;color:var(--navy);text-decoration:underline;width:auto;padding:0;margin-top:14px;font-weight:500}
+</style>
+</head>
+<body>
+<header><h1>ROTC Enrollment</h1><p id="sub">Enter your name and section to enroll.</p></header>
+<main>
+
+  <!-- Enrollment form -->
+  <section id="formView">
+    <div id="demoNotice" class="notice hidden">Demo mode: entries are saved on this device only. Add your Google Apps Script link in <code>SCRIPT_URL</code> to save to a shared sheet.</div>
+    <form id="form" novalidate>
+      <label for="name">Full name</label>
+      <input id="name" name="name" type="text" autocomplete="name" maxlength="80" required>
+      <label for="section">Section</label>
+      <input id="section" name="section" type="text" placeholder="e.g. BSAeE 3-A" maxlength="40" required>
+      <div id="error" class="error hidden" role="alert"></div>
+      <button id="submitBtn" type="submit">Enroll</button>
+    </form>
+  </section>
+
+  <!-- Confirmation -->
+  <section id="doneView" class="hidden">
+    <div class="ok">
+      <h2 id="doneTitle">You are enrolled.</h2>
+      <p>Your name and section have been saved.</p>
+      <p id="totalLine" class="muted hidden"></p>
+      <button class="link" id="againBtn" type="button">Enroll another person</button>
+    </div>
+  </section>
+
+  <!-- QR view: open this page with #qr at the end of the address -->
+  <section id="qrView" class="hidden">
+    <h2>Scan to enroll</h2>
+    <div id="qrbox"></div>
+    <p class="muted" id="qrUrl"></p>
+    <p class="muted">Print or screenshot this QR code.</p>
+  </section>
+
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+// ====== SETTINGS ======
+// Paste your Google Apps Script Web App URL here (see setup steps).
+// Leave it empty to run in demo mode (saves only in this browser).
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycb.../exec";
+// ======================
+
+const $ = (id) => document.getElementById(id);
+const clean = (s) => s.replace(/\s+/g, " ").trim();
+
+function show(view) {
+  ["formView", "doneView", "qrView"].forEach((v) => $(v).classList.toggle("hidden", v !== view));
+}
+function showError(msg) {
+  $("error").textContent = msg;
+  $("error").classList.remove("hidden");
+}
+
+async function saveEnrollment(name, section) {
+  if (!SCRIPT_URL) {
+    // Demo mode: local only
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem("rotc_enrollees") || "[]"); } catch (e) {}
+    const dup = list.some((p) => p.name.toLowerCase() === name.toLowerCase() && p.section.toLowerCase() === section.toLowerCase());
+    if (dup) return { ok: false, error: "duplicate" };
+    list.push({ name, section, at: new Date().toISOString() });
+    try { localStorage.setItem("rotc_enrollees", JSON.stringify(list)); } catch (e) {}
+    return { ok: true };
+  }
+  const res = await fetch(SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
+    body: JSON.stringify({ name, section }),
+  });
+  return await res.json();
+}
+
+$("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("error").classList.add("hidden");
+  const name = clean($("name").value);
+  const section = clean($("section").value);
+  if (!name || !section) return showError("Enter both your full name and your section.");
+
+  const btn = $("submitBtn");
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  try {
+    const r = await saveEnrollment(name, section);
+    if (r.ok) {
+      $("doneTitle").textContent = "You are enrolled, " + name + ".";
+      if (r.total) {
+        $("totalLine").textContent = "Total enrolled so far: " + r.total;
+        $("totalLine").classList.remove("hidden");
+      } else {
+        $("totalLine").classList.add("hidden");
+      }
+      show("doneView");
+    } else if (r.error === "duplicate") {
+      showError("This name is already enrolled in that section.");
+    } else {
+      showError("Could not save. Check your entries and try again.");
+    }
+  } catch (err) {
+    showError("No connection. Check your internet and tap Enroll again.");
+  }
+  btn.disabled = false;
+  btn.textContent = "Enroll";
+});
+
+$("againBtn").addEventListener("click", () => {
+  $("form").reset();
+  show("formView");
+  $("name").focus();
+});
+
+// Start-up
+if (location.hash === "#qr") {
+  const url = location.href.split("#")[0];
+  $("sub").textContent = "Enrollment QR code";
+  $("qrUrl").textContent = url;
+  if (window.QRCode) new QRCode($("qrbox"), { text: url, width: 240, height: 240 });
+  else $("qrbox").textContent = "QR library could not load. Check your internet connection.";
+  show("qrView");
+} else {
+  if (!SCRIPT_URL) $("demoNotice").classList.remove("hidden");
+  show("formView");
+}
+</script>
+</body>
+</html>
